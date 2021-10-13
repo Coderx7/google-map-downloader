@@ -108,36 +108,55 @@ def wgs_to_gcj(wgsLon, wgsLat):
 
 # ---------------------------------------------------------
 # Get tile coordinates in Google Maps based on latitude and longitude of WGS-84
-def wgs_to_tile(j, w, z):
-    '''
-    Get google-style tile cooridinate from geographical coordinate
-    j : Longittude
-    w : Latitude
-    z : zoom
-    '''
+def wgs_to_tile( latitude, longitude, zoom):
+    """Get google-style tile cooridinate from geographical coordinate
+
+    Note: 
+    Note that this will return a tile coordinate. and a tile coordinate
+    is located at (0,0) or origin of a tile. 
+    all tiles are 256x256. there are as many gps locations inside of a tile 
+    that when used with this function will return the same exact tile coordinate
+    (as they all reside in that tile obviously) in order to get the displacement 
+    of your gps location, after calculating the tile coordinate, calculate tile's 
+    (0,0) gps location from the newly acgieved tile coordinate. then you have gps location
+    at (0,0) and now can calculate howfar your initial gps location is from the 
+    origin of the tile. 
+
+    Args:
+        latitude (float): Latitude
+        longitude (float): Longittude
+        zoom (int): zoom
+
+    Raises:
+        TypeError: [description]
+        TypeError: [description]
+
+    Returns:
+        tuple(int,int): returns tile coordinate in the form of (x,y)
+    """
     isnum = lambda x: isinstance(x, int) or isinstance(x, float)
-    if not (isnum(j) and isnum(w)):
-        raise TypeError("j and w must be int or float!")
+    if not (isnum(longitude) and isnum(latitude)):
+        raise TypeError("latitude and longitude must be int or float!")
 
-    if not isinstance(z, int) or z < 0 or z > 22:
-        raise TypeError("z must be int and between 0 to 22.")
+    if not isinstance(zoom, int) or zoom < 0 or zoom > 22:
+        raise TypeError("zoom must be int and between 0 to 22.")
 
-    if j < 0:
-        j = 180 + j
+    if longitude < 0:
+        longitude = 180 + longitude
     else:
-        j += 180
-    j /= 360  # make j to (0,1)
+        longitude += 180
+    longitude /= 360  # make longitude to (0,1)
 
-    w = 85.0511287798 if w > 85.0511287798 else w
-    w = -85.0511287798 if w < -85.0511287798 else w
-    w = log(tan((90 + w) * pi / 360)) / (pi / 180)
-    w /= 180  # make w to (-1,1)
-    w = 1 - (w + 1) / 2  # make w to (0,1) and left top is 0-point
+    latitude = 85.0511287798 if latitude > 85.0511287798 else latitude
+    latitude = -85.0511287798 if latitude < -85.0511287798 else latitude
+    latitude = math.log(math.tan((90 + latitude) * math.pi / 360)) / (math.pi / 180)
+    latitude /= 180  # make latitude to (-1,1)
+    latitude = 1 - (latitude + 1) / 2  # make latitude to (0,1) and left top is 0-point
 
-    num = 2 ** z
-    x = floor(j * num)
-    y = floor(w * num)
-    return x, y
+    num = 2 ** zoom
+    y = math.floor(latitude * num)
+    x = math.floor(longitude * num)
+    return y, x
 
 
 def pixls_to_mercator(zb):
@@ -231,8 +250,8 @@ def get_url(source, x, y, z, style):  #
 
 
 def get_urls(x1, y1, x2, y2, z, source='google', style='s'):
-    pos1x, pos1y = wgs_to_tile(x1, y1, z)
-    pos2x, pos2y = wgs_to_tile(x2, y2, z)
+    pos1y, pos1x  = wgs_to_tile(x1, y1, z)
+    pos2y, pos2x  = wgs_to_tile(x2, y2, z)
     lenx = pos2x - pos1x + 1
     leny = pos2y - pos1y + 1
     print("Total tiles number：{x} X {y}".format(x=lenx, y=leny))
@@ -265,8 +284,8 @@ def download_tiles(urls, multi=10):
 
 
 def merge_tiles(datas, x1, y1, x2, y2, z):
-    pos1x, pos1y = wgs_to_tile(x1, y1, z)
-    pos2x, pos2y = wgs_to_tile(x2, y2, z)
+    pos1y, pos1x= wgs_to_tile(x1, y1, z)
+    pos2y, pos2x= wgs_to_tile(x2, y2, z)
     lenx = pos2x - pos1x + 1
     leny = pos2y - pos1y + 1
     outpic = pil.new('RGBA', (lenx * 256, leny * 256))
@@ -284,8 +303,8 @@ def merge_tiles(datas, x1, y1, x2, y2, z):
 
 # ---------------------------------------------------------
 def getExtent(x1, y1, x2, y2, z, source="Google China"):
-    pos1x, pos1y = wgs_to_tile(x1, y1, z)
-    pos2x, pos2y = wgs_to_tile(x2, y2, z)
+    pos1y, pos1x = wgs_to_tile(x1, y1, z)
+    pos2y, pos2x = wgs_to_tile(x2, y2, z)
     Xframe = pixls_to_mercator(
         {"LT": (pos1x, pos1y), "RT": (pos2x, pos1y), "LB": (pos1x, pos2y), "RB": (pos2x, pos2y), "z": z})
     for i in ["LT", "LB", "RT", "RB"]:
