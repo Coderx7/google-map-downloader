@@ -381,7 +381,7 @@ def download_tiles(urls, multi=10, conserve_memory=False, save_tiles=False, tile
             if not conserve_memory:
                 # load datas!
                 print(f'--Loading tiles into memory:...')
-                for i, img_fname in enumerate(sorted(tqdm(os.listdir(tiles_save_path)))):
+                for i, img_fname in enumerate(tqdm(sorted(os.listdir(tiles_save_path)))):
                     img_path = os.path.join(tiles_save_path,img_fname)
                     img = pil.open(img_path)
                     img_byte_arr = io.BytesIO()
@@ -419,19 +419,27 @@ def merge_tiles(datas, y1, x1, y2, x2, z, file_path, save_memory, save_map, cach
     lenx = pos2x - pos1x + 1
     leny = pos2y - pos1y + 1
 
-    map_img_path = file_path.replace(os.path.splitext(file_path)[1],'.jpg')    
-    # print(f'x y: {lenx} {leny}')
-    # cache_dir is where the tiles are located
+    # we should use PNG as JPEG can not handle more thabn 64K pixels!
+    # becasue image formats like .jpeg only have 2 bytes available to 
+    # record the width and height, and 2 bytes has a max decimal value of 65,535.
+    # unfortunately this incurs a lot of overhead we have to deal with
+    # anyway! and resort to png which has 4 bytes for this (instead of jpegs 2 bytes)
+    # this allows for 2^32 or 4,294,967,296 pixels
+    # ref https://communities.efi.com/s/article/Error-JPEG-Compression-failed?language=en_US
+    # This is caused by a combination of preview DPI setting and the height or width of the output file. 
+    # The maximum pixel height/width of a JPEG is 65535 or 2^16-1. Many software implementations reduce 
+    # this slightly to 65500 including libjpeg and libjpeg-turbo. This is a limitation of the JPEG standard.
+    map_img_path = file_path.replace(os.path.splitext(file_path)[1],'.png')    
     if save_memory:
         dim_x = 256
         dim_y = 256
         nrows = leny*256
         ncols = lenx*256
-        nchannels = 3
+        nchannels = 4
         # we sort them as the order of tiles matter
         tiles_list = sorted(os.listdir(cache_dir))
         map_img_raw = np.memmap('map_img_memmap.np', dtype=np.uint8, mode='w+', shape=(nrows, ncols, nchannels))
-        # todo: fix this! this is just a test!
+        print(f'Note: Depending on your image size and your HDD/SSD transfer speed, this may take a long time!')        
         for i, img_name in enumerate(tqdm(tiles_list)):
             img_path = os.path.join(cache_dir, img_name)
             y, x = i // lenx, i % lenx
@@ -439,32 +447,37 @@ def merge_tiles(datas, y1, x1, y2, x2, z, file_path, save_memory, save_map, cach
             start_y = y * dim_y
             end_x = start_x + dim_x
             end_y = start_y + dim_y
-            img = pil.open(img_path).convert('RGB')
+            img = pil.open(img_path).convert('RGBA')
             map_img_raw[start_y:end_y, start_x:end_x, :] = np.asarray(img)
             # print(f'pos: ({start_x},{start_y}) - ({end_x},{end_y})')
         del map_img_raw
-        print(f'--Raw data saved to disk! now trying to get an image!')
-        map_img_raw = np.memmap('map_img_memmap.np', dtype=np.uint8, mode='r+', shape=(nrows, ncols, nchannels))
-        outpic = pil.fromarray(map_img_raw, mode='RGB')
-        del map_img_raw
-        os.remove('map_img_memmap.np')
+        print('\n--Tiles merge completed')
+        map_img_raw = np.memmap('map_img_memmap.np', dtype=np.uint8, mode='r', shape=(nrows, ncols, nchannels))
+        if save_map:
+            print(f'--Map image is being saved...')
+            pil.fromarray(map_img_raw, mode='RGBA').save(map_img_path)
+            print(f'--Map image is saved!')
+        # del map_img_raw
+        # os.remove('map_img_memmap.np')
+        # print(f'map_img_raw shape: {map_img_raw.shape}')
+        return map_img_raw
     
     else:
-        outpic = pil.new('RGBA', (lenx * 256, leny * 256))
-        for i, data in enumerate(datas):
-            picio = io.BytesIO(data)
-            small_pic = pil.open(picio)
+        map_img = pil.new('RGBA', (lenx * 256, leny * 256))
+        for i, data in enumerate(tqdm(datas)):
+            tile_bytes = io.BytesIO(data)
+            tile_img = pil.open(tile_bytes)
 
             y, x = i // lenx, i % lenx
-            outpic.paste(small_pic, (x * 256, y * 256))
+            map_img.paste(tile_img, (x * 256, y * 256))
     
-    print('\n--Tiles merge completed')
-    # Save the rgb map
-    if save_map:
-        outpic.convert('RGB').save(map_img_path)
-        print(f'--RGB map is saved!')
-   
-    return np.array(outpic.convert('RGB'))
+        print('\n--Tiles merge completed')
+        # Save the map image
+        if save_map:
+            print(f'--Map image is being saved...')
+            map_img.save(map_img_path)
+            print(f'--Map image is saved!')
+        return np.array(map_img)
 
 
 # ---------------------------------------------------------
@@ -488,10 +501,10 @@ def getExtent(y1, x1, y2, x2, z, source="Google China"):
 
 def saveTiff(r, g, b, gt, filePath):
     print(f'\n-Saving the final tif image...')
-    fname_out = filePath
     driver = gdal.GetDriverByName('GTiff')
     # Create a 3-band dataset
-    dset_output = driver.Create(fname_out, r.shape[1], r.shape[0], 3, gdal.GDT_Byte)
+    # print(f' r.shape: { r.shape} filePath: {filePath}')
+    dset_output = driver.Create(filePath, r.shape[1], r.shape[0], 3, gdal.GDT_Byte)
     dset_output.SetGeoTransform(gt)
     try:
         proj = osr.SpatialReference()
@@ -554,14 +567,14 @@ def main(top_left_lat, top_left_lon, bottom_right_lat, bottom_right_lon, zoom, f
     else:
         cache_dir = tile_save_path
 
-    outpic = merge_tiles(datas, top_left_lat, top_left_lon, bottom_right_lat, bottom_right_lon, zoom, filePath, 
+    map_img = merge_tiles(datas, top_left_lat, top_left_lon, bottom_right_lat, bottom_right_lon, zoom, filePath, 
                          save_memory=save_memory,
                          save_map=keep_rgb_map,
                          cache_dir=cache_dir)
 
     # outpic = np.array(outpic.convert('RGB'))
-    rows,cols = outpic[:,:,0].shape
-    # print(f'outpic shape: {outpic.shape}')
+    rows,cols = map_img[:,:,0].shape
+    print(f'Map shape: {map_img.shape}')
     # r, g, b = cv2.split(np.array(outpic))
 
 
@@ -573,8 +586,12 @@ def main(top_left_lat, top_left_lon, bottom_right_lat, bottom_right_lon, zoom, f
           (extent['BR'][0] - extent['TL'][0]) / cols)
     # print(f'gt: {gt}')
     # saveTiff(r, g, b, gt, filePath)
-    saveTiff(outpic[:,:,0], outpic[:,:,1], outpic[:,:,2], gt, filePath)
-
+    saveTiff(map_img[:,:,0], map_img[:,:,1], map_img[:,:,2], gt, filePath)
+    
+    # todo: remove this in a better way!
+    if os.path.exists('map_img_memmap.np'):
+        del map_img
+        os.remove('map_img_memmap.np')
 
 # ---------------------------------------------------------
 if __name__ == '__main__':
