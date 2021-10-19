@@ -11,11 +11,11 @@ modification:
 @date  : 2021-10-18
 @author: SeyyedHossein Hasanpour
 '''
-
+import os
 import io
 import math
-import numpy as np
 from math import floor, pi, log, tan, atan, exp
+import numpy as np
 from threading import Thread, Lock
 import urllib.request as ur
 import PIL.Image as pil
@@ -23,6 +23,7 @@ import PIL.Image as pil
 import cv2
 from osgeo import gdal, osr
 import time
+from tqdm import tqdm
 import argparse
 
 
@@ -73,6 +74,35 @@ parser.add_argument('-br',
                     nargs="+",
                     required=True,
                     help="The area's bottom right corner latitue and longitude values (e.g. 35.542383 51.602294 )")
+
+parser.add_argument('-sm',
+                    '--save_memory',
+                    default=False,
+                    action="store_true",
+                    help="Whether to conserve/save computer memory(RAM) as much as possible.\
+                    This is important for saving large areas or when you have little RAM available.")
+
+parser.add_argument('-km',
+                    '--keep_rgb_map',
+                    default=True,
+                    action="store_true",
+                    help="Whether to keep(save) the intermediate map in jpeg as well")
+
+parser.add_argument('-kt',
+                    '--keep_tiles',
+                    default=True,
+                    action="store_true",
+                    help="Whether to keep(save) the tiles as well")
+
+parser.add_argument('-tp',
+                    '--tiles_save_path',
+                    default='tiles/',
+                    help="the directory path inside which to save the tiles")
+
+parser.add_argument('-ut'
+                    ,'--use_existing_tiles',
+                    action="store_true",
+                    help="whether to use an existing tiles folders(uses tiles_save_path)")
 
 args = parser.parse_args()
 
@@ -246,30 +276,43 @@ def tile_to_pixls(zb):
 
 
 # -----------------------------------------------------------
-
+#TODO: 
+# add support for downloading tiles
+# add support for conserving memory  
 # ---------------------------------------------------------
 class Downloader(Thread):
     # multiple threads downloader
-    def __init__(self, index, count, urls, datas, update):
-        # index represents the number of threads
-        # count represents the total number of threads
+    def __init__(self, num_threads, total_thread_count, urls, datas, update, conserve_memory, save_tiles, tile_save_path):
+        # num_threads represents the number of threads
+        # total_thread_count represents the total number of threads
         # urls represents the list of URLs nedd to be downloaded
         # datas represents the list of data need to be returned.
         super().__init__()
         self.urls = urls
         self.datas = datas
-        self.index = index
-        self.count = count
+        self.num_threads = num_threads
+        self.total_thread_count = total_thread_count
         self.update = update
+        self.save_tiles = save_tiles
+        self.tile_save_path = tile_save_path
+        self.conserve_memory = conserve_memory
 
-    def download(self, url):
+    def download(self, tile_url, tile_coordx, tile_coordy):
         HEADERS = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/88.0.4324.150 Safari/537.36 Edg/88.0.705.68'}
-        header = ur.Request(url, headers=HEADERS)
+        header = ur.Request(tile_url, headers=HEADERS)
         err = 0
         while (err < 3):
             try:
                 data = ur.urlopen(header).read()
+                try:
+                    if self.save_tiles or self.conserve_memory:
+                        img_blob = io.BytesIO(data)
+                        tile_img = pil.open(img_blob)
+                        tile_img.save(f'{self.tile_save_path}/tile_{tile_coordy}_{tile_coordx}.jpg')
+                except Exception as ex:
+                    print(f'An exception has occured during saving the tiles:\n{ex}')
+                    exit(-1)
             except:
                 err += 1
             else:
@@ -278,9 +321,14 @@ class Downloader(Thread):
 
     def run(self):
         for i, url in enumerate(self.urls):
-            if i % self.count != self.index:
+            if i % self.total_thread_count != self.num_threads:
                 continue
-            self.datas[i] = self.download(url)
+            
+            if self.conserve_memory:
+                self.download(*url)
+            else:
+                self.datas[i] = self.download(*url)
+
             if mutex.acquire():
                 self.update()
                 mutex.release()
@@ -300,7 +348,7 @@ def get_url(source, x, y, z, style):  #
         url = MAP_URLS["Google"].format(x=x, y=y, z=z, style=style)
     else:
         raise Exception("Unknown Map Source ! ")
-    return url
+    return url,x,y
 
 
 def get_urls(y1, x1, y2, x2, z, source='google', style='s'):
@@ -308,28 +356,55 @@ def get_urls(y1, x1, y2, x2, z, source='google', style='s'):
     pos2y, pos2x  = wgs_to_tile(y2, x2, z)
     lenx = pos2x - pos1x + 1
     leny = pos2y - pos1y + 1
-    print("Total tiles number(YxX)：{y} X {x}".format(y=leny, x=lenx))
+    print("-Total tiles number(YxX): {y} x {x}".format(y=leny, x=lenx))
     urls = [get_url(source, i, j, z, style) for j in range(pos1y, pos1y + leny) for i in range(pos1x, pos1x + lenx)]
     return urls
 
-
 # ---------------------------------------------------------
 
 # ---------------------------------------------------------
-def download_tiles(urls, multi=10):
+def download_tiles(urls, multi=10, conserve_memory=False, save_tiles=False, tiles_save_path='tiles', use_existing_tiles=False):
     def makeupdate(s):
         def up():
             global COUNT
             COUNT += 1
-            print("\rDownLoading...[{0}/{1}]".format(COUNT, s), end='')
+            print("\r--DownLoading...[{0}/{1}]".format(COUNT, s), end='')
 
         return up
-
+    
     url_len = len(urls)
     datas = [None] * url_len
+
+    if use_existing_tiles:
+        if os.path.exists(tiles_save_path) and len(os.listdir(tiles_save_path))>0:
+
+            if not conserve_memory:
+                # load datas!
+                print(f'--Loading tiles into memory:...')
+                for i, img_fname in enumerate(sorted(tqdm(os.listdir(tiles_save_path)))):
+                    img_path = os.path.join(tiles_save_path,img_fname)
+                    img = pil.open(img_path)
+                    img_byte_arr = io.BytesIO()
+                    img.save(img_byte_arr, format='PNG')
+                    datas[i] = img_byte_arr.getvalue()
+            return datas 
+        else:
+            print(f"Error: The tile directory '{tiles_save_path}' doesnt exist or does not have any tiles.")
+            exit(-1)
+
+    if save_tiles or conserve_memory:
+        if (os.path.exists(tiles_save_path) and len(os.listdir(tiles_save_path)) >0):
+            print(f"Error: The path '{tiles_save_path}' is full! please choose an empty directory.")
+            exit(-1)
+        else:
+            os.makedirs(tiles_save_path, exist_ok=False)
+        
     if multi < 1 or multi > 20 or not isinstance(multi, int):
         raise Exception("multi of Downloader shuold be int and between 1 to 20.")
-    tasks = [Downloader(i, multi, urls, datas, makeupdate(url_len)) for i in range(multi)]
+    tasks = [Downloader(i, multi, urls, datas, makeupdate(url_len), 
+                        conserve_memory=conserve_memory, 
+                        save_tiles=save_tiles, 
+                        tile_save_path=tiles_save_path) for i in range(multi)]
     for i in tasks:
         i.start()
     for i in tasks:
@@ -337,20 +412,59 @@ def download_tiles(urls, multi=10):
     return datas
 
 
-def merge_tiles(datas, y1, x1, y2, x2, z):
+def merge_tiles(datas, y1, x1, y2, x2, z, file_path, save_memory, save_map, cache_dir):
+    print('\n--Merging downloaded tiles...')
     pos1y, pos1x= wgs_to_tile(y1, x1, z)
     pos2y, pos2x= wgs_to_tile(y2, x2, z)
     lenx = pos2x - pos1x + 1
     leny = pos2y - pos1y + 1
-    outpic = pil.new('RGBA', (lenx * 256, leny * 256))
-    for i, data in enumerate(datas):
-        picio = io.BytesIO(data)
-        small_pic = pil.open(picio)
 
-        y, x = i // lenx, i % lenx
-        outpic.paste(small_pic, (x * 256, y * 256))
-    print('\nTiles merge completed')
-    return outpic
+    map_img_path = file_path.replace(os.path.splitext(file_path)[1],'.jpg')    
+    # print(f'x y: {lenx} {leny}')
+    # cache_dir is where the tiles are located
+    if save_memory:
+        dim_x = 256
+        dim_y = 256
+        nrows = leny*256
+        ncols = lenx*256
+        nchannels = 3
+        # we sort them as the order of tiles matter
+        tiles_list = sorted(os.listdir(cache_dir))
+        map_img_raw = np.memmap('map_img_memmap.np', dtype=np.uint8, mode='w+', shape=(nrows, ncols, nchannels))
+        # todo: fix this! this is just a test!
+        for i, img_name in enumerate(tqdm(tiles_list)):
+            img_path = os.path.join(cache_dir, img_name)
+            y, x = i // lenx, i % lenx
+            start_x = x * dim_x
+            start_y = y * dim_y
+            end_x = start_x + dim_x
+            end_y = start_y + dim_y
+            img = pil.open(img_path).convert('RGB')
+            map_img_raw[start_y:end_y, start_x:end_x, :] = np.asarray(img)
+            # print(f'pos: ({start_x},{start_y}) - ({end_x},{end_y})')
+        del map_img_raw
+        print(f'--Raw data saved to disk! now trying to get an image!')
+        map_img_raw = np.memmap('map_img_memmap.np', dtype=np.uint8, mode='r+', shape=(nrows, ncols, nchannels))
+        outpic = pil.fromarray(map_img_raw, mode='RGB')
+        del map_img_raw
+        os.remove('map_img_memmap.np')
+    
+    else:
+        outpic = pil.new('RGBA', (lenx * 256, leny * 256))
+        for i, data in enumerate(datas):
+            picio = io.BytesIO(data)
+            small_pic = pil.open(picio)
+
+            y, x = i // lenx, i % lenx
+            outpic.paste(small_pic, (x * 256, y * 256))
+    
+    print('\n--Tiles merge completed')
+    # Save the rgb map
+    if save_map:
+        outpic.convert('RGB').save(map_img_path)
+        print(f'--RGB map is saved!')
+   
+    return np.array(outpic.convert('RGB'))
 
 
 # ---------------------------------------------------------
@@ -373,6 +487,7 @@ def getExtent(y1, x1, y2, x2, z, source="Google China"):
 
 
 def saveTiff(r, g, b, gt, filePath):
+    print(f'\n-Saving the final tif image...')
     fname_out = filePath
     driver = gdal.GetDriverByName('GTiff')
     # Create a 3-band dataset
@@ -389,12 +504,13 @@ def saveTiff(r, g, b, gt, filePath):
     dset_output.GetRasterBand(3).WriteArray(b)
     dset_output.FlushCache()
     dset_output = None
-    print("Image Saved")
+    print("--Image Saved")
 
 
 # ---------------------------------------------------------
 
-def main(top_left_lat, top_left_lon, bottom_right_lat, bottom_right_lon, zoom, filePath, style='s', server="Google China"):
+def main(top_left_lat, top_left_lon, bottom_right_lat, bottom_right_lon, zoom, filePath, style='s', server="Google China", 
+         save_memory=False, keep_rgb_map=False, save_tiles=False, tile_save_path='tiles', reuse_downloaded_tiles=False):
     """
     Download images based on spatial extent.
 
@@ -426,19 +542,38 @@ def main(top_left_lat, top_left_lon, bottom_right_lat, bottom_right_lon, zoom, f
     urls = get_urls(top_left_lat, top_left_lon, bottom_right_lat, bottom_right_lon, zoom, server, style)
 
     # Download tiles
-    datas = download_tiles(urls)
+    datas = download_tiles(urls, multi=10,  
+                           conserve_memory=save_memory, 
+                           save_tiles=save_tiles, 
+                           tiles_save_path=tile_save_path,
+                           use_existing_tiles=reuse_downloaded_tiles)
 
     # Combine downloaded tile maps into one map
-    outpic = merge_tiles(datas, top_left_lat, top_left_lon, bottom_right_lat, bottom_right_lon, zoom)
-    outpic = outpic.convert('RGB')
-    r, g, b = cv2.split(np.array(outpic))
+    if save_memory and not save_tiles:
+        cache_dir = 'cache'
+    else:
+        cache_dir = tile_save_path
+
+    outpic = merge_tiles(datas, top_left_lat, top_left_lon, bottom_right_lat, bottom_right_lon, zoom, filePath, 
+                         save_memory=save_memory,
+                         save_map=keep_rgb_map,
+                         cache_dir=cache_dir)
+
+    # outpic = np.array(outpic.convert('RGB'))
+    rows,cols = outpic[:,:,0].shape
+    # print(f'outpic shape: {outpic.shape}')
+    # r, g, b = cv2.split(np.array(outpic))
+
 
     # Get the spatial information of the four corners of the merged map and use it for outputting
     extent = getExtent(top_left_lat, top_left_lon, bottom_right_lat, bottom_right_lon, zoom, server)
-    gt = (extent['TL'][1], (extent['BR'][1] - extent['TL'][1]) / r.shape[0], 0, extent['TL'][0], 0,
-          (extent['BR'][0] - extent['TL'][0]) / r.shape[1])
+    # gt = (extent['TL'][0], (extent['BR'][0] - extent['TL'][0]) / r.shape[1], 0, extent['TL'][1], 0,
+    #       (extent['BR'][1] - extent['TL'][1]) / r.shape[0])
+    gt = (extent['TL'][1], (extent['BR'][1] - extent['TL'][1]) / rows, 0, extent['TL'][0], 0,
+          (extent['BR'][0] - extent['TL'][0]) / cols)
     # print(f'gt: {gt}')
-    saveTiff(r, g, b, gt, filePath)
+    # saveTiff(r, g, b, gt, filePath)
+    saveTiff(outpic[:,:,0], outpic[:,:,1], outpic[:,:,2], gt, filePath)
 
 
 # ---------------------------------------------------------
@@ -449,14 +584,19 @@ if __name__ == '__main__':
     mutex = Lock()
 
     style_description = {'s':'sattelite', 'm':'map', 'y': 'satellite with label', 't':'terrain', 'p': 'terrain with labels', 'h': 'label'}
-
-    print(f'Downloading the map using the following information:\n')
-    print(f'zoom:                     {args.zoom}')
-    print(f'style:                    {args.style} ({style_description[args.style]})')
-    print(f'server:                   {args.server}')
-    print(f'file path:                {args.path}')
-    print(f'area top left corner:     {args.area_coordinate_top_left}')
-    print(f'area bottom right corner: {args.area_coordinate_bottom_right}\n')
+    
+    print(f'-Downloading the map using the following information:')
+    print(f'--zoom:                     {args.zoom}')
+    print(f'--style:                    {args.style} ({style_description[args.style]})')
+    print(f'--server:                   {args.server}')
+    print(f'--file path:                {args.path}')
+    print(f'--save memory               {args.save_memory}')
+    print(f'--save tiles:               {args.keep_tiles}')
+    print(f'--save rgb map:             {args.keep_rgb_map}')
+    print(f'--use existing tiles:       {args.use_existing_tiles}')
+    print(f'--tiles save location:      {args.tiles_save_path}')
+    print(f'--area top left corner:     {args.area_coordinate_top_left}')
+    print(f'--area bottom right corner: {args.area_coordinate_bottom_right}\n')
         
     top_left_lat, top_left_lon = tuple(args.area_coordinate_top_left)
     bottom_right_lat, bottom_right_lon = tuple(args.area_coordinate_bottom_right)
@@ -468,8 +608,13 @@ if __name__ == '__main__':
          zoom=args.zoom, 
          filePath=args.path, 
          style=args.style,
-         server=args.server)
+         server=args.server,
+         save_memory=args.save_memory,
+         keep_rgb_map=args.keep_rgb_map,
+         save_tiles=args.keep_tiles, 
+         tile_save_path=args.tiles_save_path,
+         reuse_downloaded_tiles=args.use_existing_tiles)
 
     end_time = time.time()
     elapsed = end_time - start_time
-    print(f'lasted a total of {elapsed:.2f} seconds')
+    print(f'\n-Elapsed time: {elapsed:.2f} seconds')
