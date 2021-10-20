@@ -57,7 +57,8 @@ parser.add_argument('-p',
                     metavar='path',
                     type=str,
                     default='map.tif',
-                    help='The file path you want to save as')
+                    help='The file path you want to save as. if you want to use save-memory option, choose a fast drive (e.g. an ssd) otherwise,\
+                        based on how large the area and zoom level of your choice is, it will take a lot of time.')
 
 parser.add_argument('-tl',
                     '--area_coordinate_top_left',
@@ -103,6 +104,11 @@ parser.add_argument('-ut'
                     ,'--use_existing_tiles',
                     action="store_true",
                     help="Whether to use an existing tiles folders(uses tiles_save_path)")
+
+parser.add_argument('-kc'
+                    ,'--keep_cache',
+                    action="store_true",
+                    help="Whether to keep a numpy cache (this is only valid if you have used save_memory)")                    
 
 args = parser.parse_args()
 
@@ -337,6 +343,11 @@ class Downloader(Thread):
 # ---------------------------------------------------------
 
 # ---------------------------------------------------------
+#TODO: Add more servers
+# china satellite map
+# arcgis x,y,zoom possibly!
+# ...
+
 MAP_URLS = {
     "Google": "http://mts0.googleapis.com/vt?lyrs={style}&x={x}&y={y}&z={z}",
     "Google China": "http://mt2.google.cn/vt/lyrs={style}&hl=zh-CN&gl=CN&src=app&x={x}&y={y}&z={z}"}
@@ -524,7 +535,7 @@ def saveTiff(r, g, b, gt, filePath):
 # ---------------------------------------------------------
 
 def main(top_left_lat, top_left_lon, bottom_right_lat, bottom_right_lon, zoom, file_path, style='s', server="Google", 
-         save_memory=False, keep_rgb_map=False, save_tiles=False, tile_save_path='tiles', use_existing_tiles=False):
+         save_memory=False, keep_cache=False, keep_rgb_map=False, save_tiles=False, tile_save_path='tiles', use_existing_tiles=False):
     """Downloads a map of the area specified by the given coordinates.
 
     Args:
@@ -538,6 +549,7 @@ def main(top_left_lat, top_left_lon, bottom_right_lat, bottom_right_lon, zoom, f
         server (str, optional): The download server (Google, Google China). Defaults to "Google".
         save_memory (bool, optional): Whether to conserve/save computer memory(RAM) as much as possible.\
                     This is important for saving large areas or when you have little RAM available. Defaults to False.
+        keep_cache (bool, optional): Whether to keep numpy cache which is temporarily created when save_memory is used. Defaults to False.
         keep_rgb_map (bool, optional): Whether to keep(save) the intermediate map in jpeg as well. Defaults to False.
         save_tiles (bool, optional): Whether to keep(save) the tiles as well. Defaults to False.
         tile_save_path (str, optional): The directory path inside which to save the tiles. Defaults to 'tiles'.
@@ -578,7 +590,7 @@ def main(top_left_lat, top_left_lon, bottom_right_lat, bottom_right_lon, zoom, f
     saveTiff(map_img[:,:,0], map_img[:,:,1], map_img[:,:,2], gt, file_path)
     
     # todo: remove this in a better way!
-    if args.save_memory:
+    if save_memory and not keep_cache:
         map_img_cache_path = file_path.replace(os.path.splitext(file_path)[1], '_memmap.np')
         if os.path.exists(map_img_cache_path):
             del map_img
@@ -599,6 +611,7 @@ if __name__ == '__main__':
     print(f'--server:                   {args.server}')
     print(f'--file path:                {args.path}')
     print(f'--save memory               {args.save_memory}')
+    print(f'--Keep np cache:            {args.keep_cache}')
     print(f'--save tiles:               {args.keep_tiles}')
     print(f'--save rgb map:             {args.keep_rgb_map}')
     print(f'--use existing tiles:       {args.use_existing_tiles}')
@@ -618,6 +631,7 @@ if __name__ == '__main__':
          style=args.style,
          server=args.server,
          save_memory=args.save_memory,
+         keep_cache=args.keep_cache,
          keep_rgb_map=args.keep_rgb_map,
          save_tiles=args.keep_tiles, 
          tile_save_path=args.tiles_save_path,
