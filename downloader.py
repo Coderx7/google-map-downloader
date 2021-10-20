@@ -50,7 +50,7 @@ parser.add_argument('-st',
                     type=str,
                     default='s',
                     choices=['s', 'm', 'y', 't', 'p', 'h'],
-                    help='The map style (s:satellite, m:map, y:satellite with label, t:terrain, p:terrain with label, h:label')
+                    help='The map style (s:satellite, m:map, y:satellite with label, t:terrain, p:terrain with label, h:label)')
 
 parser.add_argument('-p',
                     '--path',
@@ -97,12 +97,12 @@ parser.add_argument('-kt',
 parser.add_argument('-tp',
                     '--tiles_save_path',
                     default='tiles/',
-                    help="the directory path inside which to save the tiles")
+                    help="The directory path inside which to save the tiles")
 
 parser.add_argument('-ut'
                     ,'--use_existing_tiles',
                     action="store_true",
-                    help="whether to use an existing tiles folders(uses tiles_save_path)")
+                    help="Whether to use an existing tiles folders(uses tiles_save_path)")
 
 args = parser.parse_args()
 
@@ -429,7 +429,8 @@ def merge_tiles(datas, y1, x1, y2, x2, z, file_path, save_memory, save_map, cach
     # This is caused by a combination of preview DPI setting and the height or width of the output file. 
     # The maximum pixel height/width of a JPEG is 65535 or 2^16-1. Many software implementations reduce 
     # this slightly to 65500 including libjpeg and libjpeg-turbo. This is a limitation of the JPEG standard.
-    map_img_path = file_path.replace(os.path.splitext(file_path)[1],'.png')    
+    map_img_path = file_path.replace(os.path.splitext(file_path)[1],'.png')
+    map_img_cache = file_path.replace(os.path.splitext(file_path)[1],'_memmap.np')
     if save_memory:
         dim_x = 256
         dim_y = 256
@@ -438,7 +439,7 @@ def merge_tiles(datas, y1, x1, y2, x2, z, file_path, save_memory, save_map, cach
         nchannels = 4
         # we sort them as the order of tiles matter
         tiles_list = sorted(os.listdir(cache_dir))
-        map_img_raw = np.memmap('map_img_memmap.np', dtype=np.uint8, mode='w+', shape=(nrows, ncols, nchannels))
+        map_img_raw = np.memmap(map_img_cache, dtype=np.uint8, mode='w+', shape=(nrows, ncols, nchannels))
         print(f'Note: Depending on your image size and your HDD/SSD transfer speed, this may take a long time!')        
         for i, img_name in enumerate(tqdm(tiles_list)):
             img_path = os.path.join(cache_dir, img_name)
@@ -452,7 +453,7 @@ def merge_tiles(datas, y1, x1, y2, x2, z, file_path, save_memory, save_map, cach
             # print(f'pos: ({start_x},{start_y}) - ({end_x},{end_y})')
         del map_img_raw
         print('\n--Tiles merge completed')
-        map_img_raw = np.memmap('map_img_memmap.np', dtype=np.uint8, mode='r', shape=(nrows, ncols, nchannels))
+        map_img_raw = np.memmap(map_img_cache, dtype=np.uint8, mode='r', shape=(nrows, ncols, nchannels))
         if save_map:
             print(f'--Map image is being saved...')
             pil.fromarray(map_img_raw, mode='RGBA').save(map_img_path)
@@ -522,33 +523,25 @@ def saveTiff(r, g, b, gt, filePath):
 
 # ---------------------------------------------------------
 
-def main(top_left_lat, top_left_lon, bottom_right_lat, bottom_right_lon, zoom, filePath, style='s', server="Google China", 
-         save_memory=False, keep_rgb_map=False, save_tiles=False, tile_save_path='tiles', reuse_downloaded_tiles=False):
-    """
-    Download images based on spatial extent.
+def main(top_left_lat, top_left_lon, bottom_right_lat, bottom_right_lon, zoom, file_path, style='s', server="Google", 
+         save_memory=False, keep_rgb_map=False, save_tiles=False, tile_save_path='tiles', use_existing_tiles=False):
+    """Downloads a map of the area specified by the given coordinates.
 
-    East longitude is positive and west longitude is negative.
-    North latitude is positive, south latitude is negative.
-
-    Parameters
-    ----------
-    top_left_lat, top_left_lon : top(lat)-left(lon) coordinate, for example (38.866, 100.361)
-        
-    bottom_right_lat, bottom_right_lon : bottom(lat)-right(lon) coordinate
-        
-    z : zoom
-
-    filePath : File path for storing results, TIFF format
-        
-    style : 
-        m for map; 
-        s for satellite; 
-        y for satellite with label; 
-        t for terrain; 
-        p for terrain with label; 
-        h for label;
-    
-    source : Google China (default) or Google
+    Args:
+        top_left_lat (float): The top left corner latitude of the area you would like to capture
+        top_left_lon (float): The top left corner longitude of the area you would like to capture
+        bottom_right_lat (float): The bottom right corner latitude of the area you would like to capture
+        bottom_right_lon (float): The bottom right corner longitude of the area you would like to capture
+        zoom (int): The zoom level at which you want the satallite images (1-21)
+        file_path (str): The file path you want to save as
+        style (str, optional): The map style (s:satellite, m:map, y:satellite with label, t:terrain, p:terrain with label, h:label). Defaults to 's'.
+        server (str, optional): The download server (Google, Google China). Defaults to "Google".
+        save_memory (bool, optional): Whether to conserve/save computer memory(RAM) as much as possible.\
+                    This is important for saving large areas or when you have little RAM available. Defaults to False.
+        keep_rgb_map (bool, optional): Whether to keep(save) the intermediate map in jpeg as well. Defaults to False.
+        save_tiles (bool, optional): Whether to keep(save) the tiles as well. Defaults to False.
+        tile_save_path (str, optional): The directory path inside which to save the tiles. Defaults to 'tiles'.
+        use_existing_tiles (bool, optional): Whether to use an existing tiles folders(uses tiles_save_path). Defaults to False.
     """
     # ---------------------------------------------------------
     # Get the urls of all tiles in the extent
@@ -559,7 +552,7 @@ def main(top_left_lat, top_left_lon, bottom_right_lat, bottom_right_lon, zoom, f
                            conserve_memory=save_memory, 
                            save_tiles=save_tiles, 
                            tiles_save_path=tile_save_path,
-                           use_existing_tiles=reuse_downloaded_tiles)
+                           use_existing_tiles=use_existing_tiles)
 
     # Combine downloaded tile maps into one map
     if save_memory and not save_tiles:
@@ -567,16 +560,13 @@ def main(top_left_lat, top_left_lon, bottom_right_lat, bottom_right_lon, zoom, f
     else:
         cache_dir = tile_save_path
 
-    map_img = merge_tiles(datas, top_left_lat, top_left_lon, bottom_right_lat, bottom_right_lon, zoom, filePath, 
+    map_img = merge_tiles(datas, top_left_lat, top_left_lon, bottom_right_lat, bottom_right_lon, zoom, file_path, 
                          save_memory=save_memory,
                          save_map=keep_rgb_map,
                          cache_dir=cache_dir)
 
-    # outpic = np.array(outpic.convert('RGB'))
     rows,cols = map_img[:,:,0].shape
     print(f'Map shape: {map_img.shape}')
-    # r, g, b = cv2.split(np.array(outpic))
-
 
     # Get the spatial information of the four corners of the merged map and use it for outputting
     extent = getExtent(top_left_lat, top_left_lon, bottom_right_lat, bottom_right_lon, zoom, server)
@@ -584,14 +574,15 @@ def main(top_left_lat, top_left_lon, bottom_right_lat, bottom_right_lon, zoom, f
     #       (extent['BR'][1] - extent['TL'][1]) / r.shape[0])
     gt = (extent['TL'][1], (extent['BR'][1] - extent['TL'][1]) / rows, 0, extent['TL'][0], 0,
           (extent['BR'][0] - extent['TL'][0]) / cols)
-    # print(f'gt: {gt}')
-    # saveTiff(r, g, b, gt, filePath)
-    saveTiff(map_img[:,:,0], map_img[:,:,1], map_img[:,:,2], gt, filePath)
+
+    saveTiff(map_img[:,:,0], map_img[:,:,1], map_img[:,:,2], gt, file_path)
     
     # todo: remove this in a better way!
-    if os.path.exists('map_img_memmap.np'):
-        del map_img
-        os.remove('map_img_memmap.np')
+    if args.save_memory:
+        map_img_cache_path = file_path.replace(os.path.splitext(file_path)[1], '_memmap.np')
+        if os.path.exists(map_img_cache_path):
+            del map_img
+            os.remove(map_img_cache_path)
 
 # ---------------------------------------------------------
 if __name__ == '__main__':
@@ -623,14 +614,14 @@ if __name__ == '__main__':
          bottom_right_lat=bottom_right_lat, 
          bottom_right_lon=bottom_right_lon,
          zoom=args.zoom, 
-         filePath=args.path, 
+         file_path=args.path, 
          style=args.style,
          server=args.server,
          save_memory=args.save_memory,
          keep_rgb_map=args.keep_rgb_map,
          save_tiles=args.keep_tiles, 
          tile_save_path=args.tiles_save_path,
-         reuse_downloaded_tiles=args.use_existing_tiles)
+         use_existing_tiles=args.use_existing_tiles)
 
     end_time = time.time()
     elapsed = end_time - start_time

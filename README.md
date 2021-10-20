@@ -1,5 +1,5 @@
 # Google-Map-Downloader
-![Google-Map-Downloader](https://geospatialmedia.s3.amazonaws.com/wp-content/uploads/2016/07/google-earth.jpg)
+![Google-Map-Downloader](https://geospatialmedia.s3.amazonaws.com/wp-content/uploads/2016/07/google-earth.jpg)  
 A small tool for downloading google map images. just specify the area you need by two sets of coordinates and you are good to go!
 I tried to add several options to make it even easier to use including an option to save RAM at the expense of speed!
 This is usually required for large areas (images with 60000x84000 pixels!(my usecase) and more). 
@@ -31,5 +31,5 @@ def download(self,url):
                 return data
         raise Exception("Bad network link.")
 ```
-##Note:
+##Note:  
 This is based on the good work of [zhengjie9510](https://github.com/zhengjie9510/google-map-downloader) 
