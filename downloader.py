@@ -344,9 +344,6 @@ class Downloader(Thread):
 
 # ---------------------------------------------------------
 #TODO: Add more servers
-# china satellite map
-# arcgis x,y,zoom possibly!
-# ...
 
 MAP_URLS = {
     "Google": "http://mts0.googleapis.com/vt?lyrs={style}&x={x}&y={y}&z={z}",
